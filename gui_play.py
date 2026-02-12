@@ -19,6 +19,10 @@ class gui_play:
         sd.wait()
         print("end")
 
+    def play_from_array(self, data, sr):
+        sd.play(data, sr)
+        sd.wait()
+
 
 if __name__ == "__main__":  # テスト用コード
     music = gui_play()
