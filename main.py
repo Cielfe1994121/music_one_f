@@ -1,6 +1,8 @@
 from gui_play import gui_play as gp
 import librosa
 import numpy as np
+import matplotlib.pyplot as plt
+from scipy import signal
 
 # インポート（ここは現状のファイル名とクラス名に合わせています）
 from syn_volume import syn_volume
@@ -17,6 +19,8 @@ if __name__ == "__main__":
 
     print("Loading music...")
     data, sr = librosa.load(file_path, mono=False, sr=None, duration=180)
+
+    be_data = data.copy()
 
     # 1. Volume (メソッド名が syn_vol のはず)
     vol_inst = syn_volume()
@@ -52,4 +56,61 @@ if __name__ == "__main__":
     print("reverbを1/fに乗せてる")
 
     print("Playing...")
-    player.play_from_array(data.T, sr)
+    # player.play_from_array(data.T, sr)
+    """
+    af = data
+    # 1秒分だけ表示
+    limit = int(1 * sr)
+    fig, ax = plt.subplots(3, 1, sharex=True)
+
+    # ステレオ対応：左チャンネル[0]だけをプロット
+    ax[0].plot(be[0, :limit], label="Before", color="tab:blue")
+    ax[1].plot(af[0, :limit], label="After", color="tab:orange")
+
+    ax[2].plot(be[0, :limit], label="Before", color="tab:blue", alpha=1)
+    ax[2].plot(af[0, :limit], label="After", color="tab:orange", alpha=0.5)
+
+    for a in ax:
+        # ズームは自動
+        # a.set_ylim(-0.01, 0.01)
+        a.legend(loc="upper right")
+        a.grid(True, linestyle="--", alpha=0.5)
+
+    plt.show()
+    """
+
+    # --- 1. 波形の「極小ズーム」でギザギザ（音割れ）を見る ---
+    # 0.01秒分（約441サンプル）だけ切り出す
+    zoom_limit = int(0.01 * sr)
+    start_sample = int(0.5 * sr)  # 曲の開始0.5秒地点から
+
+    fig, ax = plt.subplots(2, 1, figsize=(10, 8))
+
+    # Before/Afterを重ねて表示
+    ax[0].plot(
+        be_data[0, start_sample : start_sample + zoom_limit],
+        label="Original (Smooth)",
+        alpha=0.8,
+    )
+    ax[0].plot(
+        data[0, start_sample : start_sample + zoom_limit],
+        label="Processed (Distorted)",
+        alpha=0.6,
+    )
+    ax[0].set_title("Waveform Zoom (0.01s) - Look for jagged edges")
+    ax[0].legend()
+
+    # --- 2. スペクトル表示で「ノイズ」を暴く ---
+    # 周波数成分を計算
+    f_be, Pxx_be = signal.welch(be_data[0], sr, nperseg=1024)
+    f_af, Pxx_af = signal.welch(data[0], sr, nperseg=1024)
+
+    ax[1].semilogy(f_be, Pxx_be, label="Before")
+    ax[1].semilogy(f_af, Pxx_af, label="After (1/f Processed)")
+    ax[1].set_title("Power Spectral Density - 1/f slope & Artifacts")
+    ax[1].set_xlabel("Frequency [Hz]")
+    ax[1].set_ylabel("Power")
+    ax[1].legend()
+
+    plt.tight_layout()
+    plt.show()
