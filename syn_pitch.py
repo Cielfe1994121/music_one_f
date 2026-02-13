@@ -9,73 +9,55 @@ class syn_pitch:
     def get_file_path(self):
         self.file = gp()
         self.file_path = self.file.gui_get_music()
-        # Pitch処理でもステレオ対応は必須
+        # ここでは読み込むだけ
         self.data, self.sr = librosa.load(
             self.file_path, mono=False, sr=None, duration=180
         )
+        return self.data, self.sr
 
-        # モノラル対策（Panと同じ）
-        if self.data.ndim == 1:  # 1次元配列なら
-            self.data = np.vstack([self.data, self.data])  # 無理やり2次元にする
-        elif np.mean(np.abs(self.data[1])) < 0.0001:
+    def syn_pitch(self, data, sr):
+        # 1. 安全装置：モノラル対策
+        if data.ndim == 1:
+            data = np.vstack([data, data])
+        elif np.mean(np.abs(data[1])) < 0.0001:
             print("Mono source detected! Copying Left to Right...")
-            self.data[1] = self.data[0].copy()
+            data[1] = data[0].copy()
 
-        # ---------------------------------------------------------
-        # 【ここから Pitch処理（Tape Wobble）】
-        # ---------------------------------------------------------
-
-        length = self.data.shape[1]
+        # 2. 処理開始
+        length = data.shape[1]
         self.one_f = ofg.generate_one_f(length)
 
-        # 1. ゆらぎ係数を作る
-        # ピッチは敏感なので、係数は小さめにしないと「酔い」ます
-        # * 0.02 くらいで「お、テープ伸びてるな」と分かります
+        # テープ伸び係数（0.05くらいが適量）
         fluctuation = (self.one_f.ifft_real_result - 1) * 0.05
 
-        # 2. 「歪んだ時間の地図」を作る
-        # 1.0 = 普通の速度。 1.05 = 速い。 0.95 = 遅い。
+        # 時間の歪みマップ作成
         speed_map = 1.0 + fluctuation
-
-        # 「累積和（cumsum）」を使って、歪んだ時間を積み上げる
-        # 例：[1, 1, 1] -> [1, 2, 3] (正常)
-        # 例：[1, 1.2, 0.8] -> [1, 2.2, 3.0] (歪んでる)
         dirty_time_index = np.cumsum(speed_map)
 
-        # 3. 尺合わせ（重要！）
-        # 早回し・遅回しをすると、曲の長さが変わってしまいます。
-        # 強制的に「元の曲の長さ」に収まるように縮尺を合わせます。
+        # 尺合わせ（元の曲の長さに強制的に合わせる）
         dirty_time_index = dirty_time_index / dirty_time_index[-1] * (length - 1)
 
-        # 4. リサンプリング（補間）
-        # 「歪んだ時間の地図」に従って、元のデータから音を拾ってくる
-        # np.interp(欲しい場所, 今の目盛り, 今のデータ)
+        # リサンプリング（補間）実行
         original_index = np.arange(length)
 
-        # 左チャンネル処理
-        self.data[0] = np.interp(dirty_time_index, original_index, self.data[0])
-        # 右チャンネル処理（同じ歪み方をさせないと左右でズレて気持ち悪いので同じindexを使う）
-        self.data[1] = np.interp(dirty_time_index, original_index, self.data[1])
+        # 左右それぞれ加工
+        data[0] = np.interp(dirty_time_index, original_index, data[0])
+        data[1] = np.interp(dirty_time_index, original_index, data[1])
 
-        # 再生（転置を忘れずに）
-        self.file.play_from_array(self.data.T, self.sr)
+        # 加工済みデータを返す（バケツリレー用）
+        return data
 
-    def get_beaf(self):
-        # Pitchの変化は見えにくいので、今回は「時間の歪みカーブ」そのものを返してもいいかも
-        # とりあえず波形を返します
-        return self.data[0], self.data[1]  # 加工後のLR
-
-    def vid(self, left, right):
-        # Pitchの可視化は難しいので、とりあえずPanと同じ構成で確認
+    def vid(self, lf, ri):
+        # Pitchは変化が見えにくいので、長めに10秒表示
         self.limit = int(10 * self.sr)
         fig, ax = plt.subplots(3, 1, sharex=True)
 
-        ax[0].plot(left[: self.limit], label="Left (Pitch Mod)", color="tab:blue")
-        ax[1].plot(right[: self.limit], label="Right (Pitch Mod)", color="tab:orange")
+        ax[0].plot(lf[: self.limit], label="Left (Pitch Mod)", color="tab:blue")
+        ax[1].plot(ri[: self.limit], label="Right (Pitch Mod)", color="tab:orange")
 
-        # 拡大比較
-        ax[2].plot(left[: self.limit], label="Left", color="tab:blue", alpha=0.7)
-        ax[2].plot(right[: self.limit], label="Right", color="tab:orange", alpha=0.7)
+        # 重ねて表示（ズレが見えるかも）
+        ax[2].plot(lf[: self.limit], label="Left", color="tab:blue", alpha=0.7)
+        ax[2].plot(ri[: self.limit], label="Right", color="tab:orange", alpha=0.7)
 
         for a in ax:
             a.legend(loc="upper right")
@@ -86,6 +68,14 @@ class syn_pitch:
 
 if __name__ == "__main__":
     syn = syn_pitch()
-    syn.get_file_path()
-    l, r = syn.get_beaf()
-    syn.vid(l, r)
+    # 1. 読み込み
+    data, sr = syn.get_file_path()
+
+    # 2. 加工（戻り値で上書き）
+    data = syn.syn_pitch(data, sr)
+
+    # 3. 表示
+    syn.vid(data[0], data[1])
+
+    # 再生確認したければここを開放
+    # syn.file.play_from_array(data.T, sr)
