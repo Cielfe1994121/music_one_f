@@ -64,16 +64,16 @@ if __name__ == "__main__":
     # グラフが出る前に音が鳴り始めます
     # (再生を止めたい場合はコメントアウトしてください)
     print("Playing...")
-    player.play_from_array(data.T, sr)
+    # player.play_from_array(data.T, sr)
 
-    # --- 5. 可視化（ノイズチェックと1/f特性の確認） ---
+    # （前略...再生処理の後）
+
+    # --- 5. 可視化（理想的な1/f曲線付き） ---
     print("Generating graphs...")
 
-    # (A) 波形の極小ズーム（ノイズ/音割れチェック）
-    zoom_limit = int(0.01 * sr)  # 0.01秒
-    start_sample = int(0.5 * sr)  # 0.5秒地点
-
-    # データの長さが足りない場合の安全策
+    # (A) 波形の極小ズーム
+    zoom_limit = int(0.01 * sr)
+    start_sample = int(0.5 * sr)
     if start_sample + zoom_limit > data.shape[1]:
         start_sample = 0
 
@@ -82,31 +82,54 @@ if __name__ == "__main__":
     # 波形比較
     ax[0].plot(
         be_data[0, start_sample : start_sample + zoom_limit],
-        label="Original (Smooth)",
+        label="Original",
         alpha=0.8,
         color="tab:blue",
     )
     ax[0].plot(
         data[0, start_sample : start_sample + zoom_limit],
-        label="Processed (Final Result)",
+        label="Processed",
         alpha=0.6,
         color="tab:orange",
     )
-    ax[0].set_title("Waveform Zoom (0.01s) - Check for Jagged Edges")
+    ax[0].set_title("Waveform Zoom (0.01s)")
     ax[0].legend(loc="upper right")
     ax[0].grid(True, linestyle="--", alpha=0.5)
 
-    # (B) スペクトル分析（1/f特性と高周波ノイズのチェック）
+    # (B) スペクトル分析
     f_be, Pxx_be = signal.welch(be_data[0], sr, nperseg=1024)
     f_af, Pxx_af = signal.welch(data[0], sr, nperseg=1024)
 
-    ax[1].semilogy(f_be, Pxx_be, label="Before", color="tab:blue")
-    ax[1].semilogy(f_af, Pxx_af, label="After (1/f Processed)", color="tab:orange")
-    ax[1].set_title("Power Spectral Density - Check 1/f Slope")
+    # --- ここが追加機能：理想的な1/f直線の計算 ---
+    # 数学的な 1/f (ピンクノイズ) の傾きを作る
+    f_ideal = f_af.copy()
+    f_ideal[0] = 1e-10  # 0除算回避
+    P_ideal = 1.0 / f_ideal
+
+    # グラフ上でオレンジ線（加工後）と重なるように高さを合わせる（スケーリング）
+    # 100Hz〜1000Hzあたりの平均パワーを基準に合わせる
+    ref_mask = (f_af > 100) & (f_af < 1000)
+    if np.sum(ref_mask) > 0:
+        scale_factor = np.mean(Pxx_af[ref_mask]) / np.mean(P_ideal[ref_mask])
+        P_ideal = P_ideal * scale_factor
+
+    # 描画 (理想線は緑の点線)
+    ax[1].loglog(f_be, Pxx_be, label="Before", color="tab:blue", alpha=0.5)
+    ax[1].loglog(f_af, Pxx_af, label="After (Your 1/f Music)", color="tab:orange")
+    ax[1].loglog(
+        f_ideal,
+        P_ideal,
+        label="Ideal 1/f Slope (Pink Noise)",
+        color="green",
+        linestyle="--",
+        linewidth=2,
+    )
+
+    ax[1].set_title("Power Spectral Density vs Ideal 1/f")
     ax[1].set_xlabel("Frequency [Hz]")
     ax[1].set_ylabel("Power")
     ax[1].legend(loc="upper right")
-    ax[1].grid(True, linestyle="--", alpha=0.5)
+    ax[1].grid(True, linestyle="--", alpha=0.5, which="both")
 
     plt.tight_layout()
     plt.show()
