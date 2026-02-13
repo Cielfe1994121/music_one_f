@@ -56,7 +56,7 @@ if __name__ == "__main__":
     print("reverbを1/fに乗せてる")
 
     print("Playing...")
-    # player.play_from_array(data.T, sr)
+    player.play_from_array(data.T, sr)
     """
     af = data
     # 1秒分だけ表示
